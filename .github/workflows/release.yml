@@ -1,0 +1,44 @@
+name: Release
+
+# Push a tag like v1.2.0 and this builds QuantaRAM.exe (+ .sha256) and attaches it to the
+# GitHub release for that tag. The in-app updater picks it up from there.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish single-file exe
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          dotnet publish QuantaRAM.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true -p:DebugType=none -p:Version=$v -o out
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $h = (Get-FileHash out/QuantaRAM.exe -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("out/QuantaRAM.exe.sha256", "$h  QuantaRAM.exe")
+
+      - name: Create / update release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "Quanta $tag" --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          gh release upload $tag out/QuantaRAM.exe out/QuantaRAM.exe.sha256 --clobber
+          exit $LASTEXITCODE
